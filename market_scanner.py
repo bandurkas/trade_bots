@@ -9,6 +9,7 @@
 import logging
 import re
 import time
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -104,9 +105,19 @@ class MarketScanner:
 
         # Token IDs: [0] = UP, [1] = DOWN
         clob_ids = m.get("clobTokenIds", [])
+        
+        # FIX: Gamma API sometimes returns clobTokenIds as a string
+        if isinstance(clob_ids, str):
+            try:
+                clob_ids = json.loads(clob_ids)
+            except json.JSONDecodeError:
+                logger.error(f"Ошибка парсинга clobTokenIds для {question}: {clob_ids}")
+                return None
+
         if not clob_ids or len(clob_ids) < 2:
             logger.warning(f"Нет clobTokenIds для {question}")
             return None
+            
         up_token_id   = clob_ids[0]
         down_token_id = clob_ids[1]
 
@@ -119,8 +130,6 @@ class MarketScanner:
             up_price, down_price = 0.5, 0.5
 
         # Цена-таргет: используем bestAsk/lastTradePrice как приближение
-        # В реальности это BTC цена Chainlink в момент старта раунда.
-        # Мы запоминаем цену BTC когда видим новый раунд впервые.
         price_to_beat = self._get_price_to_beat(
             condition_id      = m.get("conditionId", ""),
             start_time        = start_time,
@@ -155,10 +164,6 @@ class MarketScanner:
         start_time: str,
         current_btc_price: Optional[float],
     ) -> Optional[float]:
-        """
-        Запоминаем BTC цену при первом появлении раунда.
-        Это приближение реальной Chainlink цены на старте.
-        """
         if condition_id in self._round_start_prices:
             return self._round_start_prices[condition_id]
 

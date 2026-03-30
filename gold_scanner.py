@@ -4,6 +4,7 @@
 """
 import logging
 import time
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -100,9 +101,21 @@ class GoldScanner:
         volume = float(m.get("volumeNum") or m.get("volume") or 0)
 
         clob_ids = m.get("clobTokenIds", [])
+        
+        # FIX: Gamma API sometimes returns clobTokenIds as a string
+        if isinstance(clob_ids, str):
+            try:
+                clob_ids = json.loads(clob_ids)
+            except json.JSONDecodeError:
+                logger.error(f"Ошибка парсинга clobTokenIds для Gold рынка: {clob_ids}")
+                return None
+
         if not clob_ids or len(clob_ids) < 2:
             logger.warning("Нет clobTokenIds для Gold рынка")
             return None
+            
+        up_token_id   = clob_ids[0]
+        down_token_id = clob_ids[1]
 
         outcome_prices = m.get("outcomePrices", ["0.5", "0.5"])
         try:
@@ -119,8 +132,8 @@ class GoldScanner:
             question      = question,
             end_date      = end_date,
             price_to_beat = price_to_beat or 0.0,
-            up_token_id   = clob_ids[0],
-            down_token_id = clob_ids[1],
+            up_token_id   = up_token_id,
+            down_token_id = down_token_id,
             up_price      = up_price,
             down_price    = down_price,
             volume_usd    = volume,
