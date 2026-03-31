@@ -87,12 +87,13 @@ class PolymarketTrader:
         try:
             logger.info(f"Размещение ордера: {side} {token_id} на ${amount_usd:.2f}")
             
-            # В CLOB Polymarket "Market Order" обычно имитируется через Limit Order
-            # с ценой 1.0 (для BUY) или 0.01 (для SELL).
+            # The precision must securely be >= 1.00 after multiplication.
             price = 0.99 if side == "BUY" else 0.01
             
-            # Размер в долях (shares)
-            size = amount_usd / price if price > 0 else 0
+            # Размер в долях (shares): to deal with floating point we can floor or round, 
+            # but to ensure we pass the $1 limit we can safely add a tiny buffer
+            amount_usd = max(amount_usd, 1.01)
+            size = round(amount_usd / price, 2) if price > 0 else 0
             
             # SDK: create_and_post_order
             resp = self.client.create_and_post_order(OrderArgs(

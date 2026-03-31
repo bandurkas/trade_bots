@@ -21,6 +21,7 @@ CSV_HEADERS = [
     "btc_at_signal", "target", "gap_at_signal",
     "btc_at_close", "gap_at_close", "result",
     "momentum", "seconds_left", "market_prob",
+    "bet_amount", "payout", "profit"
 ]
 
 
@@ -39,14 +40,16 @@ class PendingSignal:
     market_prob: float
     timestamp: str
     end_date: str       # ISO когда закрывается раунд
+    bet_amount: float = 0.0
+    entry_price: float = 0.0
 
 
 class StatsTracker:
     def __init__(self):
-        self._pending: list[PendingSignal] = []
         self._session_total   = 0
         self._session_wins    = 0
         self._session_losses  = 0
+        self._session_profit  = 0.0
         self._ensure_csv()
 
     def _ensure_csv(self):
@@ -56,7 +59,7 @@ class StatsTracker:
                 writer.writerow(CSV_HEADERS)
             logger.info(f"Создан файл статистики: {STATS_FILE}")
 
-    def record_signal(self, signal: Signal, market) -> None:
+    def record_signal(self, signal: Signal, market, bet_amount: float = 0.0, entry_price: float = 0.0) -> None:
         """Записываем сигнал — результат проверим позже."""
         pending = PendingSignal(
             condition_id   = market.condition_id,
@@ -71,9 +74,11 @@ class StatsTracker:
             market_prob    = signal.market_probability,
             timestamp      = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             end_date       = market.end_date,
+            bet_amount     = bet_amount,
+            entry_price    = entry_price,
         )
         self._pending.append(pending)
-        logger.info(f"Сигнал записан в ожидание: {signal.direction} | {market.question}")
+        logger.info(f"Сигнал записан в ожидание: {signal.direction} | bet=${bet_amount} | {market.question}")
 
     def check_pending(self, current_btc_price: float, current_time_iso: str) -> list[dict]:
         """
@@ -104,14 +109,19 @@ class StatsTracker:
 
             result = "WIN" if win else "LOSS"
             gap_at_close = current_btc_price - p.target
+            
+            payout = (p.bet_amount / p.entry_price) if win and p.entry_price > 0 else 0.0
+            profit = (payout - p.bet_amount) if win else -p.bet_amount
 
-            self._write_result(p, current_btc_price, gap_at_close, result)
+            self._write_result(p, current_btc_price, gap_at_close, result, payout, profit)
 
             if win:
                 self._session_wins += 1
             else:
                 self._session_losses += 1
+            
             self._session_total += 1
+            self._session_profit += profit
 
             resolved.append({
                 "question":     p.question,
@@ -121,6 +131,9 @@ class StatsTracker:
                 "btc_close":    current_btc_price,
                 "target":       p.target,
                 "confidence":   p.confidence,
+                "bet_amount":   p.bet_amount,
+                "payout":       payout,
+                "profit":       profit
             })
             logger.info(
                 f"Результат: {result} | {p.direction} | "
@@ -135,6 +148,7 @@ class StatsTracker:
         self._session_total = 0
         self._session_wins = 0
         self._session_losses = 0
+        self._session_profit = 0.0
         logger.info("Статистика сессии сброшена (24 часа)")
 
     def _write_result(
@@ -143,6 +157,8 @@ class StatsTracker:
         btc_at_close: float,
         gap_at_close: float,
         result: str,
+        payout: float = 0.0,
+        profit: float = 0.0,
     ) -> None:
         with open(STATS_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -160,6 +176,9 @@ class StatsTracker:
                 f"{p.momentum:.4f}",
                 p.seconds_left,
                 f"{p.market_prob:.2f}",
+                f"{p.bet_amount:.2f}",
+                f"{payout:.2f}",
+                f"{profit:.2f}",
             ])
 
     # ── Итоги сессии ──────────────────────────────────────────────────────────
@@ -186,12 +205,15 @@ class StatsTracker:
         if not STATS_FILE.exists():
             return {}
         total = wins = losses = 0
+        total_profit = 0.0
         conf_wins = conf_losses = 0.0
         with open(STATS_FILE, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 total += 1
                 conf = float(row.get("confidence", 0))
+                profit = float(row.get("profit", 0.0))
+                total_profit += profit
                 if row.get("result") == "WIN":
                     wins += 1
                     conf_wins += conf
@@ -203,6 +225,7 @@ class StatsTracker:
             "wins":      wins,
             "losses":    losses,
             "win_rate":  wins / total if total > 0 else 0,
+            "total_profit": total_profit,
             "avg_conf_wins":   conf_wins / wins if wins > 0 else 0,
             "avg_conf_losses": conf_losses / losses if losses > 0 else 0,
         }

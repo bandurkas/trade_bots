@@ -126,6 +126,8 @@ async def run():
                                 break
                         else:
                             logger.warning("Баланс не изменился за 5 мин после WIN")
+                    
+                    # Передаем обновленный баланс в уведомление
                     await notify_result(res, balance=balance)
 
                 # Каждые 20 сигналов — показываем статистику
@@ -205,27 +207,43 @@ async def run():
                     stats.on_skip()
                     continue
 
+                # 1. Сначала уведомляем о сигнале/ставке
+                # Если это не DRY_RUN, пробуем поставить
+                order_id = None
+                bet_amount = 1.10 # Минимальный безопасный размер
+                entry_price = 0.99
+                
                 # Получаем баланс перед ставкой
                 balance = await trader.get_usdc_balance()
 
-                # Отправляем в Telegram
-                await notify_signal(signal, market.question, dry_run=BTC_DRY_RUN, balance=balance)
-
-                # Записываем в статистику (результат узнаем после закрытия)
-                tracker.record_signal(signal, market)
-
-                # ── Реальная торговля ($1) ──
                 if not BTC_DRY_RUN:
                     token_id = market.up_token_id if signal.direction == "UP" else market.down_token_id
                     if token_id:
-                        logger.info(f"Торговля ($1): {signal.direction} | баланс=${balance:.2f}")
-                        order_id = await trader.place_market_order(token_id, 1.0, side="BUY")
+                        logger.info(f"Торговля (${bet_amount}): {signal.direction} | баланс=${balance:.2f}")
+                        order_id = await trader.place_market_order(token_id, bet_amount, side="BUY")
                         if order_id:
                             logger.info(f"Ордер размещён: {order_id}")
+                            # Записываем в статистику (результат узнаем после закрытия)
+                            tracker.record_signal(signal, market, bet_amount=bet_amount, entry_price=entry_price)
                         else:
-                            logger.error("Ордер не прошёл — пропускаем запись в статистику")
+                            logger.error("Ордер не прошёл")
+                            continue
                     else:
-                        logger.error("Token ID не найден для торговли!")
+                        logger.error("Token ID не найден!")
+                        continue
+                else:
+                    # В симуляции просто записываем
+                    tracker.record_signal(signal, market, bet_amount=bet_amount, entry_price=0.50)
+
+                # 2. Уведомляем Telegram
+                await notify_signal(
+                    signal, 
+                    market.question, 
+                    dry_run=BTC_DRY_RUN, 
+                    balance=balance,
+                    bet_amount=bet_amount,
+                    entry_price=entry_price if not BTC_DRY_RUN else 0.50
+                )
 
             else:
                 stats.on_skip()
