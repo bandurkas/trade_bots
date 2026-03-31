@@ -62,7 +62,7 @@ async def notify_signal(
         )
 
     text = (
-        f"{mode_icon} <b>{'СТАВКА ОТКРЫТА' if not dry_run else 'НОВЫЙ СИГНАЛ (симуляция)'}</b>\n"
+        f"{mode_icon} <b>{'СТАВКА ОТКРЫТА' if not dry_run else 'Сигнал (не уверенный)'}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Рынок: <b>{question}</b>\n"
         f"🎯 Сигнал: <b>{dir_icon}</b>\n"

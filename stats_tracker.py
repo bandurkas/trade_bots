@@ -46,6 +46,7 @@ class PendingSignal:
 
 class StatsTracker:
     def __init__(self):
+        self._pending         = []
         self._session_total   = 0
         self._session_wins    = 0
         self._session_losses  = 0

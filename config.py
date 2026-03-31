@@ -17,7 +17,7 @@ BANKROLL     = float(os.getenv("BANKROLL", "50.0"))
 MOMENTUM_THRESHOLD = 0.0015   # минимум 0.15% движение за 2 мин
 ENTRY_WINDOW_MIN   = 20       # минимум секунд до закрытия
 ENTRY_WINDOW_MAX   = 90       # максимум секунд до закрытия
-MIN_GAP_FROM_TARGET = 2.0     # минимум $2 разрыв между ценой и таргетом
+MIN_GAP_FROM_TARGET = 20.0    # минимум $20 разрыв между ценой и таргетом
 MIN_VOLUME_USD      = 500     # минимум объём рынка
 
 # Риск-менеджмент

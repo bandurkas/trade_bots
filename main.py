@@ -199,11 +199,11 @@ async def run():
                     f"{signal.reason}"
                 )
 
-                # ── Порог уверенности (59.5%) ──
-                if signal.confidence < 0.595:
-                    logger.info(f"Пропуск: уверенность {signal.confidence:.1%} < 59.5%")
+                # ── Порог уверенности (61%) ──
+                if signal.confidence < 0.61:
+                    logger.info(f"Пропуск: уверенность {signal.confidence:.1%} < 61%")
                     from notifier import notify_skip
-                    await notify_skip(f"Уверенность {signal.confidence:.1%} < 59.5%", signal.seconds_left, signal.btc_price)
+                    await notify_skip(f"Уверенность {signal.confidence:.1%} < 61%", signal.seconds_left, signal.btc_price)
                     stats.on_skip()
                     continue
 
@@ -220,9 +220,12 @@ async def run():
                     token_id = market.up_token_id if signal.direction == "UP" else market.down_token_id
                     if token_id:
                         logger.info(f"Торговля (${bet_amount}): {signal.direction} | баланс=${balance:.2f}")
-                        order_id = await trader.place_market_order(token_id, bet_amount, side="BUY")
-                        if order_id:
-                            logger.info(f"Ордер размещён: {order_id}")
+                        fill = await trader.place_market_order(token_id, bet_amount, side="BUY")
+                        if fill:
+                            order_id    = fill["order_id"]
+                            bet_amount  = fill["actual_amount"]
+                            entry_price = fill["actual_price"]
+                            logger.info(f"Ордер размещён: {order_id} | заплачено=${bet_amount:.4f} | цена=${entry_price:.4f}")
                             # Записываем в статистику (результат узнаем после закрытия)
                             tracker.record_signal(signal, market, bet_amount=bet_amount, entry_price=entry_price)
                         else:
