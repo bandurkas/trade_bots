@@ -115,6 +115,17 @@ async def run():
                         f"закрытие=${res['btc_close']:.2f}"
                     )
                     balance = await trader.get_usdc_balance()
+                    if res["result"] == "WIN" and not BTC_DRY_RUN:
+                        logger.info("WIN — ждём выплаты от Polymarket (до 5 мин)...")
+                        for _ in range(30):  # 30 × 10с = 5 минут макс
+                            await asyncio.sleep(10)
+                            new_bal = await trader.get_usdc_balance()
+                            if new_bal > balance + 0.01:
+                                logger.info(f"Баланс обновился: ${balance:.2f} -> ${new_bal:.2f}")
+                                balance = new_bal
+                                break
+                        else:
+                            logger.warning("Баланс не изменился за 5 мин после WIN")
                     await notify_result(res, balance=balance)
 
                 # Каждые 20 сигналов — показываем статистику
@@ -194,18 +205,25 @@ async def run():
                     stats.on_skip()
                     continue
 
+                # Получаем баланс перед ставкой
+                balance = await trader.get_usdc_balance()
+
                 # Отправляем в Telegram
-                await notify_signal(signal, market.question, dry_run=BTC_DRY_RUN)
+                await notify_signal(signal, market.question, dry_run=BTC_DRY_RUN, balance=balance)
 
                 # Записываем в статистику (результат узнаем после закрытия)
                 tracker.record_signal(signal, market)
 
-                # ── Реальная торговля ($1 лимит для теста) ──
+                # ── Реальная торговля ($1) ──
                 if not BTC_DRY_RUN:
                     token_id = market.up_token_id if signal.direction == "UP" else market.down_token_id
                     if token_id:
-                        logger.info(f"Торговля ($1): {signal.direction} {token_id}")
-                        await trader.place_market_order(token_id, 1.0, side="BUY")
+                        logger.info(f"Торговля ($1): {signal.direction} | баланс=${balance:.2f}")
+                        order_id = await trader.place_market_order(token_id, 1.0, side="BUY")
+                        if order_id:
+                            logger.info(f"Ордер размещён: {order_id}")
+                        else:
+                            logger.error("Ордер не прошёл — пропускаем запись в статистику")
                     else:
                         logger.error("Token ID не найден для торговли!")
 
