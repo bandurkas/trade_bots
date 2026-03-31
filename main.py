@@ -14,15 +14,16 @@ import sys
 from datetime import date, datetime, timezone
 
 from clob_analyzer import CLOBAnalyzer
-from config import DRY_RUN, ENTRY_WINDOW_MAX
+from config import BTC_DRY_RUN, ENTRY_WINDOW_MAX
 from market_scanner import ActiveMarket, MarketScanner
 from notifier import (
-    notify_daily_stats, notify_result, notify_session_stats,
-    notify_signal, notify_start, notify_stop,
+    notify_daily_stats, notify_period_report, notify_result, 
+    notify_session_stats, notify_signal, notify_start, notify_stop,
 )
 from price_feed import BTCPriceFeed
 from signal_engine import SKIP_REASONS, Signal, check_signal
 from stats_tracker import StatsTracker
+from trader import PolymarketTrader
 
 # ── Логирование ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -69,15 +70,17 @@ async def run():
     tracker  = StatsTracker()
     clob     = CLOBAnalyzer()
     stats    = SessionStats()
+    trader   = PolymarketTrader()
 
-    await notify_start(DRY_RUN)
-    logger.info(f"Бот запущен | DRY_RUN={DRY_RUN}")
+    await notify_start(BTC_DRY_RUN)
+    logger.info(f"Бот запущен | DRY_RUN={BTC_DRY_RUN}")
 
     feed_task = asyncio.create_task(feed.start())
     logger.info("Ожидание данных с Kraken (5 сек)...")
     await asyncio.sleep(5)
 
     last_signal_key: str = ""
+    last_stats_total: int = 0
     iter_count = 0
 
     try:
@@ -86,8 +89,16 @@ async def run():
 
             # Ежедневный сброс
             if date.today() != stats.today:
+                # Отчет за периоды перед сбросом
+                await notify_period_report(
+                    "BTC Статистика",
+                    tracker.get_period_stats(7),
+                    tracker.get_period_stats(30),
+                    tracker.get_period_stats(365)
+                )
                 await notify_daily_stats(stats.signals_sent, 0, 0.0)
                 stats = SessionStats()
+                tracker.reset_session()
 
             # ── Проверяем результаты закрытых раундов ──
             if feed.current_price:
@@ -103,12 +114,15 @@ async def run():
                         f"таргет=${res['target']:.2f} | "
                         f"закрытие=${res['btc_close']:.2f}"
                     )
-                    await notify_result(res)
+                    balance = await trader.get_usdc_balance()
+                    await notify_result(res, balance=balance)
 
                 # Каждые 20 сигналов — показываем статистику
-                if tracker.session_total > 0 and tracker.session_total % 20 == 0:
+                if tracker.session_total > 0 and tracker.session_total % 20 == 0 and tracker.session_total != last_stats_total:
+                    last_stats_total = tracker.session_total
                     all_time = tracker.all_time_stats()
-                    await notify_session_stats(tracker.session_summary(), all_time)
+                    balance = await trader.get_usdc_balance()
+                    await notify_session_stats(tracker.session_summary(), all_time, balance=balance)
 
             # ── Получаем текущий рынок ──
             market: ActiveMarket | None = await scanner.get_active_btc_market(
@@ -172,11 +186,28 @@ async def run():
                     f"{signal.reason}"
                 )
 
+                # ── Порог уверенности (59.5%) ──
+                if signal.confidence < 0.595:
+                    logger.info(f"Пропуск: уверенность {signal.confidence:.1%} < 59.5%")
+                    from notifier import notify_skip
+                    await notify_skip(f"Уверенность {signal.confidence:.1%} < 59.5%", signal.seconds_left, signal.btc_price)
+                    stats.on_skip()
+                    continue
+
                 # Отправляем в Telegram
-                await notify_signal(signal, market.question, dry_run=DRY_RUN)
+                await notify_signal(signal, market.question, dry_run=BTC_DRY_RUN)
 
                 # Записываем в статистику (результат узнаем после закрытия)
                 tracker.record_signal(signal, market)
+
+                # ── Реальная торговля ($1 лимит для теста) ──
+                if not BTC_DRY_RUN:
+                    token_id = market.up_token_id if signal.direction == "UP" else market.down_token_id
+                    if token_id:
+                        logger.info(f"Торговля ($1): {signal.direction} {token_id}")
+                        await trader.place_market_order(token_id, 1.0, side="BUY")
+                    else:
+                        logger.error("Token ID не найден для торговли!")
 
             else:
                 stats.on_skip()
@@ -199,7 +230,8 @@ async def run():
 
         # Финальная статистика
         all_time = tracker.all_time_stats()
-        await notify_session_stats(tracker.session_summary(), all_time)
+        balance = await trader.get_usdc_balance()
+        await notify_session_stats(tracker.session_summary(), all_time, balance=balance)
         logger.info(f"Бот остановлен. {stats.summary()}")
         logger.info(f"Статистика сигналов: {tracker.session_summary()}")
         await notify_stop(f"Остановка. {stats.summary()}")

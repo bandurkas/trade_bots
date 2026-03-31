@@ -112,7 +112,7 @@ class CLOBAnalyzer:
             boost += 0.03
         boost = min(boost, 0.08)
 
-        logger.debug(
+        logger.info(
             f"CLOB flow | UP=${up_usd:.0f} DOWN=${down_usd:.0f} "
             f"net=${net_usd:+.0f} | large={large} | boost={boost:.0%} | dir={direction}"
         )
@@ -126,10 +126,20 @@ class CLOBAnalyzer:
         )
 
     async def _fetch_trades(self, token_id: str) -> list[dict]:
+        from config import POLY_API_KEY
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+        if POLY_API_KEY:
+            headers["x-poly-api-key"] = POLY_API_KEY
+            headers["x-api-key"] = POLY_API_KEY
+
         try:
             resp = await self._client.get(
                 f"{CLOB_HOST}/trades",
                 params={"token_id": token_id, "limit": 50},
+                headers=headers
             )
             resp.raise_for_status()
             raw = resp.json().get("data", [])

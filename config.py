@@ -8,8 +8,10 @@ TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # Режим работы
-DRY_RUN  = os.getenv("DRY_RUN", "true").lower() == "true"
-BANKROLL = float(os.getenv("BANKROLL", "50.0"))
+DRY_RUN      = os.getenv("DRY_RUN", "true").lower() == "true"
+BTC_DRY_RUN  = os.getenv("BTC_DRY_RUN", os.getenv("DRY_RUN", "true")).lower() == "true"
+GOLD_DRY_RUN = os.getenv("GOLD_DRY_RUN", os.getenv("DRY_RUN", "true")).lower() == "true"
+BANKROLL     = float(os.getenv("BANKROLL", "50.0"))
 
 # Стратегия: "Импульс + Последние 60 секунд"
 MOMENTUM_THRESHOLD = 0.0015   # минимум 0.15% движение за 2 мин
@@ -28,3 +30,5 @@ DAILY_LOSS_LIMIT = 0.20       # стоп при -20% за день
 CLOB_HOST = "https://clob.polymarket.com"
 GAMMA_HOST = "https://gamma-api.polymarket.com"
 CHAIN_ID  = 137               # Polygon
+POLY_API_KEY = os.getenv("POLY_API_KEY", "")
+POLY_ADDRESS = os.getenv("POLY_ADDRESS", "")

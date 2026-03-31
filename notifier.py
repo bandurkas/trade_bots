@@ -1,133 +1,166 @@
-"""
-Telegram уведомления о сигналах.
-"""
 import logging
-from typing import Optional
-
-import httpx
-
-from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
-from signal_engine import Signal
+import asyncio
+from typing import Any
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
-
-
-async def send_message(text: str) -> bool:
-    """Отправляет сообщение в Telegram. Возвращает True при успехе."""
+async def send_message(text: str) -> None:
+    """Отправка сообщения в Telegram (без сторонних библиотек через httpx)."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram не настроен (нет TOKEN или CHAT_ID)")
-        return False
+        logger.error("Telegram не настроен!")
+        return
 
-    url = TELEGRAM_API.format(token=TELEGRAM_TOKEN)
+    import httpx
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(url, json={
-                "chat_id":    TELEGRAM_CHAT_ID,
-                "text":       text,
-                "parse_mode": "HTML",
-            })
-            resp.raise_for_status()
-            return True
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=10)
+            if resp.status_code != 200:
+                logger.error(f"Ошибка Telegram API: {resp.text}")
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {e}")
-        return False
-
-
-async def notify_signal(signal: Signal, market_question: str, dry_run: bool = True) -> None:
-    """Красивое уведомление о торговом сигнале."""
-    icon = "🚀" if signal.direction == "UP" else "🔻"
-    mode = "📊 СИГНАЛ (симуляция)" if dry_run else "⚡ РЕАЛЬНАЯ СТАВКА"
-
-    text = (
-        f"{icon} <b>{mode}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Рынок: <b>{market_question}</b>\n"
-        f"🎯 Направление: <b>{signal.direction}</b>\n"
-        f"💰 BTC цена: <b>${signal.btc_price:,.2f}</b>\n"
-        f"📏 Разрыв от таргета: <b>${abs(signal.gap):.2f}</b>\n"
-        f"⏱ Осталось: <b>{signal.seconds_left}s</b>\n"
-        f"📊 Импульс: <b>{signal.momentum:.3%}</b>\n"
-        f"🎲 Уверенность: <b>{signal.confidence:.1%}</b>\n"
-        f"🏦 Рынок оценивает: <b>{signal.market_probability:.0%}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>{signal.reason}</i>"
-    )
-    await send_message(text)
-
-
-async def notify_skip(reason: str, seconds_left: int, btc_price: float) -> None:
-    """Уведомление почему сигнал пропущен (только для отладки)."""
-    text = (
-        f"⏭ <b>Пропуск</b> | {seconds_left}s | BTC ${btc_price:,.2f}\n"
-        f"<i>Причина: {reason}</i>"
-    )
-    await send_message(text)
-
 
 async def notify_start(dry_run: bool) -> None:
-    mode = "симуляция (DRY RUN)" if dry_run else "РЕАЛЬНАЯ ТОРГОВЛЯ"
+    mode = "🛠 <b>DRY RUN</b> (симуляция)" if dry_run else "🚀 <b>LIVE</b> (реальные ставки)"
+    await send_message(f"✅ <b>Бот запущен!</b>\nРежим: {mode}")
+
+async def notify_stop(reason: str = "") -> None:
+    await send_message(f"🛑 <b>Бот остановлен!</b>\nПричина: {reason}")
+
+async def notify_signal(signal: Any, question: str, dry_run: bool = True) -> None:
+    mode_icon = "🧪" if dry_run else "💰"
+    dir_icon  = "🟢 UP" if signal.direction == "UP" else "🔴 DOWN"
+    
     text = (
-        f"🤖 <b>Polymarket Signal Bot запущен</b>\n"
-        f"Режим: <b>{mode}</b>\n"
-        f"Стратегия: Импульс + Последние 60 секунд\n"
-        f"Актив: Bitcoin Up/Down — 5 minutes"
+        f"{mode_icon} <b>{'СТАВКА ОТКРЫТА' if not dry_run else 'НОВЫЙ СИГНАЛ'}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📈 Рынок: <b>{question}</b>\n"
+        f"Направление: <b>{dir_icon}</b>\n"
+        f"Цена BTC: <b>${signal.btc_price:,.2f}</b>\n"
+        f"Уверенность: <b>{signal.confidence:.1%}</b>\n"
+        f"До закрытия: <b>{signal.seconds_left} сек</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💬 {signal.reason}"
     )
     await send_message(text)
 
-
-async def notify_stop(reason: str) -> None:
-    await send_message(f"🛑 <b>Бот остановлен</b>\nПричина: {reason}")
-
-
-async def notify_result(result: dict) -> None:
-    """Уведомление о результате закрытого раунда."""
-    win     = result["result"] == "WIN"
-    icon    = "✅" if win else "❌"
-    dir_arrow = "↑" if result["direction"] == "UP" else "↓"
+async def notify_skip(reason: str, seconds: int, price: float) -> None:
+    """Уведомление о пропуске сигнала."""
     text = (
-        f"{icon} <b>Результат: {'ВЕРНО' if win else 'НЕВЕРНО'}</b>\n"
+        f"⏭ <b>Сигнал пропущен</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"Причина: <b>{reason}</b>\n"
+        f"BTC: <b>${price:,.2f}</b> | Ост. время: <b>{seconds} сек</b>"
+    )
+    await send_message(text)
+
+async def notify_result(result: dict, balance: float = 0.0) -> None:
+    icon = "✅ <b>WIN</b>" if result["result"] == "WIN" else "❌ <b>LOSS</b>"
+    dir_arrow = "⬆️" if result["direction"] == "UP" else "⬇️"
+    
+    text = (
+        f"{icon} <b>СДЕЛКА ЗАВЕРШЕНА</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📈 Рынок: <b>{result.get('question', 'неизвестно')}</b>\n"
         f"Сигнал: <b>{dir_arrow} {result['direction']}</b>\n"
         f"BTC при сигнале: <b>${result['btc_signal']:,.2f}</b>\n"
         f"BTC при закрытии: <b>${result['btc_close']:,.2f}</b>\n"
-        f"Таргет: <b>${result['target']:,.2f}</b>\n"
-        f"Уверенность была: <b>{result['confidence']:.1%}</b>"
+        f"Уверенность была: <b>{result['confidence']:.1%}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Текущий баланс: <b>${balance:,.2f}</b>"
     )
     await send_message(text)
 
-
-async def notify_session_stats(summary: str, all_time: dict) -> None:
+async def notify_session_stats(summary: str, all_time: dict, balance: float = 0.0) -> None:
     """Статистика сессии и за всё время."""
     wr_all = all_time.get("win_rate", 0)
     total  = all_time.get("total", 0)
     wins   = all_time.get("wins", 0)
     icon   = "📈" if wr_all >= 0.53 else "📉"
     text = (
-        f"📊 <b>Статистика</b>\n"
+        f"📊 <b>Статистика BTC</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<b>Сессия:</b> {summary}\n"
+        f"<b>Сессия:</b>\n{summary}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Баланс: <b>${balance:,.2f}</b>\n"
         f"<b>Всё время:</b>\n"
         f"Сигналов: <b>{total}</b> | Верных: <b>{wins}</b>\n"
         f"{icon} Win rate: <b>{wr_all:.1%}</b>"
     )
     await send_message(text)
 
+async def notify_gold_result(res: dict, balance: float = 0.0) -> None:
+    icon      = "✅" if res["result"] == "WIN" else "❌"
+    arrow     = "↑" if res["direction"] == "UP" else "↓"
+    status    = "ВИН" if res["result"] == "WIN" else "ЛОСС"
+    edge_str  = f"+{res['edge']:.0%}" if res["edge"] > 0 else f"{res['edge']:.0%}"
 
-async def notify_daily_stats(
-    trades: int,
-    wins: int,
-    total_pnl: float,
-) -> None:
-    win_rate = wins / trades if trades > 0 else 0
-    pnl_icon = "📈" if total_pnl >= 0 else "📉"
-    text = (
-        f"📋 <b>Дневная статистика</b>\n"
+    await send_message(
+        f"🥇 {icon} <b>Gold сделка завершена: {status}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"Сигналов: <b>{trades}</b>\n"
-        f"Верных: <b>{wins}</b> ({win_rate:.1%})\n"
-        f"{pnl_icon} P&L: <b>${total_pnl:+.2f}</b>"
+        f"📈 Рынок: <b>{res.get('question', 'неизвестно')}</b>\n"
+        f"Прогноз: <b>{arrow} {res['direction']}</b>\n"
+        f"XAU при сигнале: <b>${res['xau_signal']:,.2f}</b>\n"
+        f"XAU при закрытии: <b>${res['xau_close']:,.2f}</b>\n"
+        f"Edge был: <b>{edge_str}</b>\n"
+        f"Уверенность была: <b>{res['confidence']:.1%}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Текущий баланс: <b>${balance:,.2f}</b>"
+    )
+
+async def notify_period_report(title: str, stats_7d: dict, stats_30d: dict, stats_365d: dict) -> None:
+    """Отчет по периодам (Неделя, Месяц, Год)."""
+    def fmt(s):
+        w = s["wins"]
+        l = s["total"] - s["wins"]
+        wr = s["win_rate"]
+        return f"✅ {w} - ❌ {l} | WR: {wr:.1%}"
+
+    text = (
+        f"📅 <b>ОТЧЕТ ПО ПЕРИОДАМ: {title}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🗓 <b>За 7 дней (Неделя):</b>\n"
+        f"{fmt(stats_7d)}\n\n"
+        f"🗓 <b>За 30 дней (Месяц):</b>\n"
+        f"{fmt(stats_30d)}\n\n"
+        f"🗓 <b>За всё время (Год):</b>\n"
+        f"{fmt(stats_365d)}\n"
+        f"━━━━━━━━━━━━━━━━━━"
     )
     await send_message(text)
+
+async def notify_gold_start(dry_run: bool) -> None:
+    mode = "🛠 <b>DRY RUN</b>" if dry_run else "🚀 <b>LIVE</b>"
+    await send_message(f"🥇 ✅ <b>Gold Бот запущен!</b>\nРежим: {mode}")
+
+async def notify_gold_signal(signal: Any, question: str, dry_run: bool = True) -> None:
+    mode_icon = "🧪" if dry_run else "💰"
+    dir_icon  = "🟢 UP" if signal.direction == "UP" else "🔴 DOWN"
+    status_text = "GOLD СТАВКА ОТКРЫТА" if not dry_run else "GOLD СИГНАЛ"
+    
+    text = (
+        f"🥇 {mode_icon} <b>{status_text}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📈 Рынок: <b>{question}</b>\n"
+        f"Направление: <b>{dir_icon}</b>\n"
+        f"Цена Gold: <b>${signal.gold_price:,.2f}</b>\n"
+        f"Уверенность: <b>{signal.confidence:.1%}</b>\n"
+        f"Edge: <b>{signal.edge:.1%}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💬 {signal.reason}"
+    )
+    await send_message(text)
+
+async def notify_daily_stats(total: int, wins: int, wr: float) -> None:
+    await send_message(
+        f"📅 <b>Итоги дня</b>\n"
+        f"Всего: <b>{total}</b> | Верных: <b>{wins}</b>\n"
+        f"Win rate: <b>{wr:.1%}</b>"
+    )

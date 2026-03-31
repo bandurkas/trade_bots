@@ -130,6 +130,13 @@ class StatsTracker:
         self._pending = still_pending
         return resolved
 
+    def reset_session(self):
+        """Сбрасывает дневную статистику."""
+        self._session_total = 0
+        self._session_wins = 0
+        self._session_losses = 0
+        logger.info("Статистика сессии сброшена (24 часа)")
+
     def _write_result(
         self,
         p: PendingSignal,
@@ -172,7 +179,7 @@ class StatsTracker:
         w = self._session_wins
         l = self._session_losses
         wr = self.win_rate
-        return f"Всего: {t} | ✅ {w} | ❌ {l} | Win rate: {wr:.1%}"
+        return f"Всего сигналов: {t}\n✅ {w} - ❌ {l}\nWin rate: {wr:.1%}"
 
     def all_time_stats(self) -> dict:
         """Читает CSV и возвращает общую статистику за всё время."""
@@ -199,3 +206,26 @@ class StatsTracker:
             "avg_conf_wins":   conf_wins / wins if wins > 0 else 0,
             "avg_conf_losses": conf_losses / losses if losses > 0 else 0,
         }
+
+    def get_period_stats(self, days: int) -> dict:
+        """Статистика за последние X дней."""
+        if not STATS_FILE.exists():
+            return {"total": 0, "wins": 0, "win_rate": 0}
+        
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        total = wins = 0
+        
+        with open(STATS_FILE, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    # формат: 2026-03-31 10:14:07
+                    ts = datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    if ts >= cutoff:
+                        total += 1
+                        if row.get("result") == "WIN":
+                            wins += 1
+                except Exception:
+                    continue
+        return {"total": total, "wins": wins, "win_rate": wins/total if total > 0 else 0}

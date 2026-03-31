@@ -131,6 +131,13 @@ class GoldStatsTracker:
         self._pending = still_pending
         return resolved
 
+    def reset_session(self):
+        """Сбрасывает дневную статистику."""
+        self._session_total  = 0
+        self._session_wins   = 0
+        self._session_losses = 0
+        logger.info("Gold статистика сессии сброшена (24 часа)")
+
     def _write_result(
         self, p: PendingGoldSignal,
         xau_at_close: float,
@@ -168,12 +175,11 @@ class GoldStatsTracker:
         return self._session_wins / self._session_total
 
     def session_summary(self) -> str:
-        return (
-            f"Всего: {self._session_total} | "
-            f"✅ {self._session_wins} | "
-            f"❌ {self._session_losses} | "
-            f"Win rate: {self.win_rate:.1%}"
-        )
+        t = self._session_total
+        w = self._session_wins
+        l = self._session_losses
+        wr = self.win_rate
+        return f"Всего сигналов: {t}\n✅ {w} - ❌ {l}\nWin rate: {wr:.1%}"
 
     def all_time_stats(self) -> dict:
         if not STATS_FILE.exists():
@@ -192,3 +198,26 @@ class GoldStatsTracker:
             "losses":   losses,
             "win_rate": wins / total if total > 0 else 0,
         }
+
+    def get_period_stats(self, days: int) -> dict:
+        """Статистика за последние X дней."""
+        if not STATS_FILE.exists():
+            return {"total": 0, "wins": 0, "win_rate": 0}
+        
+        from datetime import date, timedelta
+        cutoff = date.today() - timedelta(days=days)
+        total = wins = 0
+        
+        with open(STATS_FILE, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    # формат: 2026-03-31
+                    dt = datetime.strptime(row["date"], "%Y-%m-%d").date()
+                    if dt >= cutoff:
+                        total += 1
+                        if row.get("result") == "WIN":
+                            wins += 1
+                except Exception:
+                    continue
+        return {"total": total, "wins": wins, "win_rate": wins/total if total > 0 else 0}
