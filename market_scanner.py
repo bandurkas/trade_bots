@@ -168,14 +168,14 @@ class MarketScanner:
         if condition_id in self._round_start_prices:
             return self._round_start_prices[condition_id]
 
-        # Фиксируем таргет только в первые 30 секунд после старта рынка
+        # Фиксируем таргет только в первые 10 секунд после старта рынка
         # (Chainlink делает снимок в момент start_time)
         if current_btc_price and current_btc_price > 0 and start_time:
             try:
                 start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
                 now = datetime.now(timezone.utc)
                 seconds_since_start = (now - start).total_seconds()
-                if 0 <= seconds_since_start <= 30:
+                if 0 <= seconds_since_start <= 10:
                     self._round_start_prices[condition_id] = current_btc_price
                     logger.info(
                         f"Таргет зафиксирован: ${current_btc_price:.2f} "
