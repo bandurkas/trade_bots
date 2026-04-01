@@ -8,7 +8,9 @@
   4. Цена уже выше/ниже таргета на MIN_GAP_FROM_TARGET
   5. 5-минутный импульс согласован с краткосрочным (если доступен)
   6. RSI не в зоне перекупленности/перепроданности (если доступен)
-  7. Polymarket CLOB order flow не противоречит сигналу (если доступен)
+  7. Рыночная вероятность не против нас (>= 20%)
+  8. Цена входа не выше 80¢ (риск/доходность)
+  9. Polymarket CLOB order flow не противоречит сигналу (если доступен)
 """
 import logging
 from dataclasses import dataclass
@@ -134,7 +136,15 @@ def check_signal(
         )
         return None
 
-    # ── Условие 8: CLOB order flow ────────────────────────────────────────────
+    # ── Условие 8: максимальная цена входа (не выше 80¢) ────────────────────
+    entry_price_check = market.up_price if direction == "UP" else market.down_price
+    if entry_price_check > 0.80:
+        SKIP_REASONS.append(
+            f"Цена входа {entry_price_check:.0%} > 80¢ — риск/доходность неприемлемы"
+        )
+        return None
+
+    # ── Условие 9: CLOB order flow ────────────────────────────────────────────
     if clob_flow and clob_flow.direction and clob_flow.direction != direction:
         SKIP_REASONS.append(
             f"CLOB flow противоречит: деньги идут в {clob_flow.direction} "
