@@ -115,9 +115,9 @@ class PolymarketTrader:
                     taking = float(resp.get("takingAmount", 0))
                     making = float(resp.get("makingAmount", 0))
                     if taking > 0 and making > 0:
-                        # takingAmount и makingAmount в единицах с 6 знаками
-                        actual_amount = taking / 1_000_000.0
-                        shares        = making / 1_000_000.0
+                        # takingAmount = шары получено, makingAmount = USDC заплачено
+                        shares        = taking
+                        actual_amount = making
                         actual_price  = round(actual_amount / shares, 4)
                 except Exception:
                     pass

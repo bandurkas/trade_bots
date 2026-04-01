@@ -126,7 +126,15 @@ def check_signal(
             SKIP_REASONS.append(f"RSI перепродан: {rsi:.1f} — возможен отскок")
             return None
 
-    # ── Условие 7: CLOB order flow ────────────────────────────────────────────
+    # ── Условие 7: рыночная вероятность не против нас ────────────────────────
+    market_prob_check = market.up_price if direction == "UP" else market.down_price
+    if market_prob_check < 0.20:
+        SKIP_REASONS.append(
+            f"Рынок оценивает {direction} в {market_prob_check:.0%} — слишком против нас"
+        )
+        return None
+
+    # ── Условие 8: CLOB order flow ────────────────────────────────────────────
     if clob_flow and clob_flow.direction and clob_flow.direction != direction:
         SKIP_REASONS.append(
             f"CLOB flow противоречит: деньги идут в {clob_flow.direction} "

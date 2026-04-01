@@ -7,7 +7,7 @@
 import csv
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -98,6 +98,11 @@ class StatsTracker:
                 continue
 
             if now < end:
+                still_pending.append(p)
+                continue
+
+            # Ждём 30 секунд после закрытия — цена оракула стабилизируется
+            if now < end + timedelta(seconds=30):
                 still_pending.append(p)
                 continue
 
